@@ -55,6 +55,8 @@
   .save-dot{width:9px;height:9px;border-radius:50%;background:#888;flex-shrink:0;transition:background .3s;}
   .save-dot.saved{background:var(--ok);}
   .save-dot.saving{background:var(--gold);}
+  .save-dot.failed{background:var(--danger);animation:pulse 1s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}
 
   .project-bar{background:#fff;border-bottom:2px solid var(--border);padding:12px 20px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;}
   .pfield{display:flex;flex-direction:column;gap:4px;}
@@ -235,7 +237,7 @@
 
   <div class="filesize-bar">
     Embedded photos: <strong id="fsCount">0</strong> &nbsp;|&nbsp; Est. export size: <strong id="fsSize">0 KB</strong>
-    <span id="fsWarn" class="fs-warn" style="display:none;">Warning: export file is large.</span>
+    <span id="fsWarn" class="fs-warn" style="display:none;">⚠ Large session — browser backup may fail. Export to a file now and consider starting a new session for remaining photos.</span>
   </div>
 
   <div class="main" id="mainContent"></div>
@@ -289,8 +291,7 @@ const PICTURE_LIST = [
     "Fuel tank — exterior showing mounting and location",
     "Fuel tank — label showing capacity and material",
     "Fuel lines — showing ISO 7840/CE mark",
-    "Fuel shutoff valve — location and label",
-    "Fuel vent — overboard vent point"
+    "Fuel shutoff valve — location and label"
   ]},
   {cat:"8. Electrical System",items:[
     "Main switchboard — panel front, fully lit",
@@ -300,8 +301,8 @@ const PICTURE_LIST = [
     "Shore power — inlet socket location and label"
   ]},
   {cat:"9. Steering System",items:[
-    "Helm station — full view including wheel/tiller",
     "Rudder stock — through-hull fitting or transom mount",
+    "Steering cylinder with CE mark, or quadrant",
     "Emergency steering arrangement if fitted"
   ]},
   {cat:"10. Accommodation",items:[
@@ -352,9 +353,11 @@ const PICTURE_LIST = [
 
 let currentRole=null, currentUser=null, state={};
 let saveTimer=null, isDirty=false;
+let photosSinceExport=0;
 function rowId(ci,ii){return `${ci}_${ii}`;}
 
 // ── AUTO-SAVE ──
+let autoSaveFailedWarningShown=false;
 function autoSave(){
   isDirty=true; setSaveDot('saving','Saving…');
   clearTimeout(saveTimer);
@@ -367,7 +370,14 @@ function autoSave(){
       }));
       isDirty=false;
       setSaveDot('saved','Saved — '+new Date().toLocaleTimeString());
-    }catch(e){ setSaveDot('','Save failed'); }
+      autoSaveFailedWarningShown=false;
+    }catch(e){
+      setSaveDot('failed','BACKUP SAVE FAILED — export now!');
+      if(!autoSaveFailedWarningShown){
+        autoSaveFailedWarningShown=true;
+        alert('WARNING: The browser backup storage is full and can no longer save your progress automatically.\n\nYour photos in this session are ONLY in memory right now.\n\nClick "Export for HO Review" immediately to save your work to a file, or you risk losing photos if the browser closes.');
+      }
+    }
   },800);
 }
 function setSaveDot(cls,msg){
@@ -602,10 +612,12 @@ function processFiles(files,id){
           setTimeout(()=>document.body.removeChild(a),500);
         }
         done++;
+        photosSinceExport++;
         if(done===files.length){
           const area=document.getElementById('photos_'+id);if(area)buildPhotoArea(area,id);
           updateFilesizeBar();autoSave();
           showToast(done===1?'Photo added.':done+' photos added.');
+          checkExportReminder();
         }
       });
     };
@@ -619,7 +631,9 @@ function makePhotoFilename(id,originalName){
   const parts=id.split('_');
   const desc=(PICTURE_LIST[parseInt(parts[0])]?.items[parseInt(parts[1])]||'').slice(0,40).replace(/[^a-zA-Z0-9]/g,'_');
   const ext=originalName.split('.').pop()||'jpg';
-  return (proj+'_'+model+'_'+desc+'.'+ext).replace(/_{2,}/g,'_');
+  const seq=String(((state[id]&&state[id].photos)?state[id].photos.length:0)+1).padStart(2,'0');
+  const stamp=Date.now().toString().slice(-5);
+  return (proj+'_'+model+'_'+desc+'_'+seq+'_'+stamp+'.'+ext).replace(/_{2,}/g,'_');
 }
 
 function removePhoto(id,idx){
@@ -697,7 +711,7 @@ function updateFilesizeBar(){
   document.getElementById('fsCount').textContent=count;
   const kb=Math.round(bytes/1024);
   document.getElementById('fsSize').textContent=kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB';
-  document.getElementById('fsWarn').style.display=kb>15000?'':'none';
+  document.getElementById('fsWarn').style.display=kb>4000?'':'none';
 }
 function renderInspSummary(container){const div=document.createElement('div');div.className='summary-panel';div.id='inspSummary';container.appendChild(div);updateInspSummary();}
 function updateInspSummary(){
@@ -755,7 +769,16 @@ function renderActionBar(){
   }
 }
 function getProjectMeta(){return{projectNo:document.getElementById('proj_num').value,model:document.getElementById('proj_model').value,date:document.getElementById('proj_date').value,exportedAt:new Date().toISOString(),exportedBy:currentUser,exportRole:currentRole};}
+function checkExportReminder(){
+  if(photosSinceExport>=20){
+    photosSinceExport=0;
+    setTimeout(()=>{
+      alert('You have taken 20+ photos since your last export.\n\nClick "Export for HO Review" now to save a backup copy to your device. This protects your work even if the browser backup limit is reached.');
+    }, 300);
+  }
+}
 function exportReviewFile(){
+  photosSinceExport=0;
   const meta=getProjectMeta();
   const blob=new Blob([JSON.stringify({meta,state},null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
