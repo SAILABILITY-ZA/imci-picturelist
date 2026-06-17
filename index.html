@@ -359,27 +359,32 @@ function rowId(ci,ii){return `${ci}_${ii}`;}
 
 // ── AUTO-SAVE ──
 let autoSaveFailedWarningShown=false;
+function doSaveNow(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      savedAt:new Date().toISOString(), role:currentRole, user:currentUser,
+      meta:{projectNo:document.getElementById('proj_num')?.value||'',model:document.getElementById('proj_model')?.value||'',date:document.getElementById('proj_date')?.value||''},
+      state
+    }));
+    isDirty=false;
+    setSaveDot('saved','Saved — '+new Date().toLocaleTimeString());
+    autoSaveFailedWarningShown=false;
+    return true;
+  }catch(e){
+    setSaveDot('failed','BACKUP SAVE FAILED — export now!');
+    if(!autoSaveFailedWarningShown){
+      autoSaveFailedWarningShown=true;
+      alert('WARNING: The browser backup storage is full and can no longer save your progress automatically.\n\nYour photos in this session are ONLY in memory right now.\n\nClick "Export for HO Review" immediately to save your work to a file, or you risk losing photos if the browser closes.');
+    }
+    return false;
+  }
+}
 function autoSave(){
   isDirty=true; setSaveDot('saving','Saving…');
   clearTimeout(saveTimer);
   saveTimer=setTimeout(()=>{
-    try{
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        savedAt:new Date().toISOString(), role:currentRole, user:currentUser,
-        meta:{projectNo:document.getElementById('proj_num')?.value||'',model:document.getElementById('proj_model')?.value||'',date:document.getElementById('proj_date')?.value||''},
-        state
-      }));
-      isDirty=false;
-      setSaveDot('saved','Saved — '+new Date().toLocaleTimeString());
-      autoSaveFailedWarningShown=false;
-    }catch(e){
-      setSaveDot('failed','BACKUP SAVE FAILED — export now!');
-      if(!autoSaveFailedWarningShown){
-        autoSaveFailedWarningShown=true;
-        alert('WARNING: The browser backup storage is full and can no longer save your progress automatically.\n\nYour photos in this session are ONLY in memory right now.\n\nClick "Export for HO Review" immediately to save your work to a file, or you risk losing photos if the browser closes.');
-      }
-    }
-  },800);
+    doSaveNow();
+  },250);
 }
 function setSaveDot(cls,msg){
   const d=document.getElementById('saveDot'),l=document.getElementById('saveStatus');
@@ -421,7 +426,26 @@ function restoreSession(){
 function discardSession(){ clearAutoSave(); document.getElementById('restoreBanner').style.display='none'; }
 
 window.addEventListener('beforeunload',function(e){
-  if(isDirty){e.preventDefault();e.returnValue='You have unsaved work. Export the file first to avoid losing your work.';return e.returnValue;}
+  // Always confirm before closing once the app is open — regardless of save state
+  const appOpen = document.getElementById('app') && document.getElementById('app').style.display === 'block';
+  if(appOpen){
+    e.preventDefault();
+    e.returnValue='Are you sure you want to close? Export your work first if you have not already done so.';
+    return e.returnValue;
+  }
+});
+
+// Android back button and app switching fire visibilitychange/pagehide before beforeunload
+// reliably runs — force an immediate save here as the last safety net
+document.addEventListener('visibilitychange', function(){
+  if(document.visibilityState === 'hidden' && currentRole){
+    doSaveNow();
+  }
+});
+window.addEventListener('pagehide', function(){
+  if(currentRole){
+    doSaveNow();
+  }
 });
 
 // ── LOGIN ──
@@ -519,6 +543,7 @@ function renderContent(){
           </div>`;
         const hoComEl=document.createElement('textarea');hoComEl.className='ho-comment';hoComEl.placeholder='HO comment…';
         hoComEl.value=s.hoComment||'';hoComEl.oninput=()=>{state[id].hoComment=hoComEl.value;autoSave();};
+        hoComEl.onblur=()=>{state[id].hoComment=hoComEl.value;doSaveNow();};
         ctrlEl.appendChild(hoComEl);
       }
 
@@ -530,6 +555,7 @@ function renderContent(){
       noteEl.placeholder=currentRole==='inspector'?'Inspector note…':'';
       noteEl.value=s.note||'';noteEl.readOnly=(currentRole==='ho');
       noteEl.oninput=()=>{state[id].note=noteEl.value;autoSave();};
+      noteEl.onblur=()=>{state[id].note=noteEl.value;doSaveNow();};
       noteRow.appendChild(noteEl);
 
       row.appendChild(numEl);row.appendChild(descEl);row.appendChild(ctrlEl);
